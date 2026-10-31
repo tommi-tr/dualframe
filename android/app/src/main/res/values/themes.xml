@@ -51,4 +51,17 @@
         <item name="android:letterSpacing">0.12</item>
         <item name="android:textColor">#FFD6D3D1</item>
     </style>
+    <style name="Cell">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+    </style>
+
+    <style name="CellDivider">
+        <item name="android:layout_width">1dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:layout_marginBottom">10dp</item>
+        <item name="android:background">#26FFFFFF</item>
+    </style>
 </resources>

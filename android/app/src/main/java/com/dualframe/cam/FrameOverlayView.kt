@@ -70,6 +70,50 @@ class FrameOverlayView @JvmOverloads constructor(
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 8f * density
     }
+    // ---- Livella ----
+    var showLevel: Boolean = true
+        set(v) { field = v; invalidate() }
+    private var levelAngle = 0f
+    private var levelVisible = false
+    private val levelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND
+    }
+
+    /** Angolo dell'orizzonte sullo schermo (gradi) e se ha senso mostrarlo (telefono non appoggiato in piano). */
+    fun setLevel(angleDeg: Float, visible: Boolean) {
+        if (kotlin.math.abs(angleDeg - levelAngle) < 0.15f && visible == levelVisible) return
+        levelAngle = angleDeg
+        levelVisible = visible
+        if (showLevel) invalidate()
+    }
+
+    private fun drawLevel(canvas: Canvas) {
+        if (!showLevel || !levelVisible || width == 0) return
+        val cx = width / 2f
+        val cy = height / 2f
+        val ref = kotlin.math.round(levelAngle / 90f) * 90f
+        val dev = levelAngle - ref
+        val level = kotlin.math.abs(dev) < 1f
+        val half = width * 0.16f
+        val gap = 10f * density
+        val tick = 16f * density
+        canvas.save()
+        // Riferimenti fissi (dove deve arrivare la linea)
+        canvas.rotate(ref, cx, cy)
+        levelPaint.strokeWidth = 2f * density
+        levelPaint.color = if (level) 0xFFD2FC50.toInt() else Color.argb(150, 255, 255, 255)
+        canvas.drawLine(cx - half - gap - tick, cy, cx - half - gap, cy, levelPaint)
+        canvas.drawLine(cx + half + gap, cy, cx + half + gap + tick, cy, levelPaint)
+        canvas.restore()
+        // Orizzonte reale
+        canvas.save()
+        canvas.rotate(if (level) ref else levelAngle, cx, cy)
+        levelPaint.strokeWidth = (if (level) 2.5f else 1.5f) * density
+        levelPaint.color = if (level) 0xFFD2FC50.toInt() else Color.WHITE
+        canvas.drawLine(cx - half, cy, cx + half, cy, levelPaint)
+        canvas.restore()
+    }
+
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; color = Color.argb(90, 255, 255, 255); strokeWidth = 1f * density
     }
@@ -340,6 +384,7 @@ class FrameOverlayView @JvmOverloads constructor(
         drawGrip(canvas, s, accent)
         drawGrip(canvas, p, Color.WHITE)
 
+        drawLevel(canvas)
         focusMarker?.let { f -> drawFocus(canvas, f) }
 
         val now = System.currentTimeMillis()

@@ -58,15 +58,16 @@ class MainActivity : ComponentActivity() {
     private lateinit var flashView: View
     private lateinit var statusChip: TextView
     private lateinit var topBar: LinearLayout
-    private lateinit var btnFlash: ImageButton
-    private lateinit var btnGrid: ImageButton
-    private lateinit var chips: LinearLayout
-    private lateinit var chipRes: TextView
-    private lateinit var chipFps: TextView
-    private lateinit var chipCodec: TextView
-    private lateinit var chipFocus: TextView
-    private lateinit var chipAperture: TextView
-    private lateinit var chipLens: TextView
+    private lateinit var btnFlash: SettingCell
+    private lateinit var btnGrid: SettingCell
+    private lateinit var chipRes: SettingCell
+    private lateinit var chipFps: SettingCell
+    private lateinit var chipCodec: SettingCell
+    private lateinit var chipFocus: SettingCell
+    private lateinit var chipAperture: SettingCell
+    private lateinit var chipLens: SettingCell
+    private lateinit var appVersion: TextView
+    private lateinit var sensorManager: android.hardware.SensorManager
     private lateinit var menuPanel: LinearLayout
     private lateinit var menuTitle: TextView
     private lateinit var menuOptions: LinearLayout
@@ -147,16 +148,34 @@ class MainActivity : ComponentActivity() {
         modePhoto.setOnClickListener { setMode(CameraController.Mode.PHOTO) }
         modeVideo.setOnClickListener { setMode(CameraController.Mode.VIDEO) }
         chipRes.setOnClickListener { toggleMenu(if (mode == CameraController.Mode.VIDEO) "vres" else "pres") }
-        chipFps.setOnClickListener { toggleMenu("fps") }
-        chipCodec.setOnClickListener { toggleMenu("codec") }
+        chipFps.setOnClickListener {
+            if (mode == CameraController.Mode.VIDEO) toggleMenu("fps") else showToast("Gli fps valgono per i video: passa a VIDEO")
+        }
+        chipCodec.setOnClickListener {
+            if (mode == CameraController.Mode.VIDEO) toggleMenu("codec") else showToast("Il codec vale per i video: passa a VIDEO")
+        }
         chipFocus.setOnClickListener { toggleMenu("focus") }
         chipAperture.setOnClickListener { toggleMenu("aperture") }
         chipLens.setOnClickListener { toggleMenu("lens") }
         btnFlash.setOnClickListener { cycleFlash() }
+        // GUIDE: nessuna → livella → griglia → entrambe
         btnGrid.setOnClickListener {
-            settings.grid = !settings.grid
+            val (g, l) = when {
+                !settings.grid && !settings.level -> false to true
+                !settings.grid && settings.level -> true to false
+                settings.grid && !settings.level -> true to true
+                else -> false to false
+            }
+            settings.grid = g
+            settings.level = l
             refreshUi()
         }
+        appVersion.text = "Camera Dual ${BuildConfig.VERSION_NAME}"
+        appVersion.setOnClickListener { checkForUpdate() }
+        chipLens.caption = "Lente"; chipRes.caption = "Risol."; chipFps.caption = "fps"
+        chipCodec.caption = "Codec"; chipFocus.caption = "Fuoco"; chipAperture.caption = "Diafr."
+        btnFlash.caption = "Flash"; btnGrid.caption = "Guide"
+        sensorManager = getSystemService(android.hardware.SensorManager::class.java)
         gallery.setOnClickListener { startActivity(Intent(this, TakesActivity::class.java)) }
         findViewById<Button>(R.id.btnPermission).setOnClickListener { requestPermissions() }
         focusSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -213,7 +232,7 @@ class MainActivity : ComponentActivity() {
         topBar = findViewById(R.id.topBar)
         btnFlash = findViewById(R.id.btnFlash)
         btnGrid = findViewById(R.id.btnGrid)
-        chips = findViewById(R.id.chips)
+        appVersion = findViewById(R.id.appVersion)
         chipRes = findViewById(R.id.chipRes)
         chipFps = findViewById(R.id.chipFps)
         chipCodec = findViewById(R.id.chipCodec)
@@ -261,13 +280,33 @@ class MainActivity : ComponentActivity() {
         handler.post(pendingPoll)
     }
 
+    private val levelListener = object : android.hardware.SensorEventListener {
+        private var gx = 0f
+        private var gy = 9.8f
+        private var gz = 0f
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            // Filtro leggero per una livella stabile
+            gx += (e.values[0] - gx) * 0.2f
+            gy += (e.values[1] - gy) * 0.2f
+            gz += (e.values[2] - gz) * 0.2f
+            val flat = kotlin.math.abs(gz) > 8.3f // telefono quasi orizzontale sul tavolo: livella nascosta
+            overlay.setLevel(Math.toDegrees(kotlin.math.atan2(gx.toDouble(), gy.toDouble())).toFloat(), !flat)
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+    }
+
     override fun onResume() {
         super.onResume()
         orientationListener.enable()
+        (sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
+            ?: sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER))?.let {
+            sensorManager.registerListener(levelListener, it, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
         orientationListener.disable()
+        sensorManager.unregisterListener(levelListener)
         super.onPause()
     }
 
@@ -381,27 +420,41 @@ class MainActivity : ComponentActivity() {
         val video = mode == CameraController.Mode.VIDEO
         val rec = recordingActive
 
-        chipRes.text = if (video) settings.videoRes.label else settings.photoRes.label
-        chipFps.text = "${settings.fps.value}fps"
-        chipCodec.text = if (settings.codec == Codec.HEVC) "HEVC" else "H264"
-        chipLens.text = controller.lens?.shortLabel ?: "1×"
-        chipLens.setBackgroundResource(if (openMenu == "lens") R.drawable.bg_chip_active else R.drawable.bg_chip)
-        chipFps.visibility = if (video) View.VISIBLE else View.GONE
-        chipCodec.visibility = if (video) View.VISIBLE else View.GONE
         val resKey = if (video) "vres" else "pres"
-        chipRes.setBackgroundResource(if (openMenu == resKey) R.drawable.bg_chip_active else R.drawable.bg_chip)
-        chipFps.setBackgroundResource(if (openMenu == "fps") R.drawable.bg_chip_active else R.drawable.bg_chip)
-        chipCodec.setBackgroundResource(if (openMenu == "codec") R.drawable.bg_chip_active else R.drawable.bg_chip)
-        chips.alpha = if (rec) 0.45f else 1f
-
-        chipFocus.text = when (controller.focusMode) {
+        chipLens.value = controller.lens?.shortLabel ?: "1×"
+        chipRes.value = if (video) settings.videoRes.label else settings.photoRes.label
+        chipFps.value = "${if (video) controller.activeFps else settings.fps.value}"
+        chipCodec.value = if (settings.codec == Codec.HEVC) "HEVC" else "H.264"
+        chipFocus.value = when (controller.focusMode) {
             CameraController.FocusMode.AUTO -> "AF"
             CameraController.FocusMode.POINT -> "AF·P"
             CameraController.FocusMode.MANUAL -> "MF"
         }
-        chipAperture.text = controller.currentAperture?.let { "f/" + fmtAperture(it) } ?: "f/–"
-        chipFocus.setBackgroundResource(if (openMenu == "focus") R.drawable.bg_chip_active else R.drawable.bg_chip)
-        chipAperture.setBackgroundResource(if (openMenu == "aperture") R.drawable.bg_chip_active else R.drawable.bg_chip)
+        chipAperture.value = controller.currentAperture?.let { "f/" + fmtAperture(it) } ?: "—"
+        btnFlash.value = when (settings.flash) {
+            FlashMode.OFF -> "Off"
+            FlashMode.AUTO -> "Auto"
+            FlashMode.ON -> "On"
+        }
+        btnGrid.value = when {
+            settings.grid && settings.level -> "Tutte"
+            settings.grid -> "Griglia"
+            settings.level -> "Livella"
+            else -> "Off"
+        }
+        chipLens.active = openMenu == "lens"
+        chipRes.active = openMenu == resKey
+        chipFps.active = openMenu == "fps"
+        chipCodec.active = openMenu == "codec"
+        chipFocus.active = openMenu == "focus"
+        chipAperture.active = openMenu == "aperture"
+        // In foto fps e codec non contano; durante la ripresa sono bloccati.
+        chipRes.dimmed = rec
+        chipFps.dimmed = rec || !video
+        chipCodec.dimmed = rec || !video
+        btnFlash.dimmed = controller.camera != null && !controller.hasFlash
+        overlay.showLevel = settings.level
+        appVersion.setTextColor(if (rec) 0x40FFFFFF else 0x33FFFFFF)
 
         modePhoto.setTextColor(if (!video) accent else Color.rgb(214, 211, 209))
         modeVideo.setTextColor(if (video) accent else Color.rgb(214, 211, 209))
@@ -441,15 +494,6 @@ class MainActivity : ComponentActivity() {
             btnSnap.updateLayoutParams<FrameLayout.LayoutParams> { gravity = snapGravity }
         }
 
-        btnFlash.setImageResource(
-            when (settings.flash) {
-                FlashMode.OFF -> R.drawable.ic_flash_off
-                FlashMode.AUTO -> R.drawable.ic_flash_auto
-                FlashMode.ON -> R.drawable.ic_flash_on
-            }
-        )
-        btnFlash.alpha = if (controller.camera == null || controller.hasFlash) 1f else 0.4f
-        btnGrid.alpha = if (settings.grid) 1f else 0.55f
         overlay.showGrid = settings.grid
     }
 
@@ -476,7 +520,7 @@ class MainActivity : ComponentActivity() {
 
     private fun rotateIcons() {
         val r = iconRotation()
-        listOf<View>(btnFlash, btnGrid, gallery, btnRecenter, btnSnap).forEach {
+        listOf<View>(gallery, btnRecenter, btnSnap).forEach {
             it.animate().rotation(r).setDuration(200).start()
         }
     }
@@ -512,6 +556,7 @@ class MainActivity : ComponentActivity() {
     private fun loadGalleryThumb() {
         lifecycleScope.launch {
             val bmp = withContext(Dispatchers.IO) {
+                TakeStore.prune(applicationContext)
                 val take = TakeStore.all(applicationContext).firstOrNull() ?: return@withContext null
                 val ref = take.vertical ?: take.horizontal ?: take.photos.lastOrNull()?.let { it.vertical ?: it.horizontal }
                     ?: return@withContext null
@@ -521,6 +566,40 @@ class MainActivity : ComponentActivity() {
             }
             if (bmp != null) gallery.setImageBitmap(bmp)
         }
+    }
+
+    // ---------- Aggiornamenti ----------
+
+    private fun checkForUpdate() {
+        val current = BuildConfig.VERSION_NAME
+        appVersion.text = "Controllo aggiornamenti…"
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) { UpdateChecker.check(current) }
+            appVersion.text = "Camera Dual $current"
+            val dialog = android.app.AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            when (r) {
+                is UpdateChecker.Result.UpToDate -> {
+                    showToast("Hai già l'ultima versione ($current)")
+                    return@launch
+                }
+                is UpdateChecker.Result.Newer -> dialog
+                    .setTitle("Nuova versione ${r.version}")
+                    .setMessage("Hai la $current. Scarica l'APK da GitHub e aprilo per aggiornare: le impostazioni e i video in attesa restano.")
+                    .setPositiveButton("Scarica") { _, _ -> openUrl(r.apkUrl ?: r.pageUrl) }
+                    .setNegativeButton("Più tardi", null)
+                is UpdateChecker.Result.Unavailable -> dialog
+                    .setTitle("Non riesco a controllare")
+                    .setMessage("${r.reason}\n\nVuoi aprire la pagina delle versioni su GitHub?")
+                    .setPositiveButton("Apri GitHub") { _, _ -> openUrl(UpdateChecker.RELEASES_PAGE) }
+                    .setNegativeButton("Chiudi", null)
+            }
+            if (!isFinishing) dialog.show()
+        }
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { showToast("Nessun browser trovato") }
     }
 
     // ---------- Menu caratteristiche ripresa ----------
@@ -676,7 +755,7 @@ class MainActivity : ComponentActivity() {
     // ---------- Lenti e messa a fuoco ----------
 
     private fun buildLensRow() {
-        chipLens.visibility = if (controller.lenses.isEmpty()) View.GONE else View.VISIBLE
+        chipLens.dimmed = controller.lenses.size <= 1
         refreshUi()
     }
 

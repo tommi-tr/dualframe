@@ -5,6 +5,8 @@ on:
       - "android/**"
       - ".github/workflows/android.yml"
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,3 +29,17 @@ jobs:
         with:
           name: CameraDual-apk
           path: android/CameraDual.apk
+      # Ogni nuova versionName diventa una "release" su GitHub con l'APK allegato:
+      # è lì che l'app controlla se c'è un aggiornamento.
+      - name: Pubblica la versione
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "La versione v$VER esiste già"
+          else
+            gh release create "v$VER" CameraDual.apk --title "Camera Dual $VER" \
+              --notes "APK per Android. Aprilo sul telefono per aggiornare (si installa sopra la versione precedente)."
+          fi

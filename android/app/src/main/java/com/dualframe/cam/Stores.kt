@@ -242,6 +242,40 @@ object TakeStore {
         write(context, list.map { if (it.id == id) change(t) else it })
     }
 
+    /**
+     * Toglie dall'elenco i file cancellati (o messi nel cestino) dalla galleria;
+     * una ripresa senza più nessun file sparisce del tutto.
+     */
+    fun prune(context: Context) {
+        val res = context.contentResolver
+        fun alive(r: MediaRef?): MediaRef? = r?.takeIf {
+            runCatching {
+                res.query(android.net.Uri.parse(it.uri), arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                    null, null, null)?.use { c -> c.count > 0 } ?: false
+            }.getOrDefault(true) // nel dubbio non si cancella nulla
+        }
+        synchronized(lock) {
+            val list = all(context)
+            var changed = false
+            val out = list.mapNotNull { t ->
+                if (t.status == "pending") return@mapNotNull t
+                val photos = t.photos.mapNotNull { p ->
+                    val v = alive(p.vertical)
+                    val h = alive(p.horizontal)
+                    if (v == null && h == null) null else p.copy(vertical = v, horizontal = h)
+                }
+                val nt = t.copy(vertical = alive(t.vertical), horizontal = alive(t.horizontal), photos = photos)
+                if (nt != t) changed = true
+                val hadMedia = t.vertical != null || t.horizontal != null || t.photos.isNotEmpty()
+                if (hadMedia && nt.vertical == null && nt.horizontal == null && nt.photos.isEmpty()) {
+                    changed = true
+                    null
+                } else nt
+            }
+            if (changed) write(context, out)
+        }
+    }
+
     fun remove(context: Context, id: String) = synchronized(lock) {
         write(context, all(context).filter { it.id != id })
     }

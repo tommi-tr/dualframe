@@ -81,3 +81,65 @@ class ShutterButton @JvmOverloads constructor(
         invalidate()
     }
 }
+
+/**
+ * Casella della barra impostazioni: etichetta piccola sopra, valore sotto.
+ * Tutte le caselle hanno la stessa larghezza, così la riga resta equilibrata e non scorre.
+ */
+class SettingCell @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null
+) : android.widget.LinearLayout(context, attrs) {
+
+    private val density = resources.displayMetrics.density
+    private val captionView = android.widget.TextView(context).apply {
+        textSize = 8.5f
+        letterSpacing = 0.08f
+        setTextColor(Color.rgb(140, 136, 132))
+        gravity = android.view.Gravity.CENTER
+        maxLines = 1
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+    }
+    private val valueView = android.widget.TextView(context).apply {
+        textSize = 12.5f
+        setTextColor(Color.WHITE)
+        gravity = android.view.Gravity.CENTER
+        maxLines = 1
+        typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD)
+    }
+    private val bg = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 9f * density }
+    private val accent = 0xFFFFB020.toInt()
+
+    var caption: String = ""
+        set(v) { field = v; captionView.text = v.uppercase() }
+
+    var value: String = ""
+        set(v) { field = v; valueView.text = v; contentDescription = "$caption $v" }
+
+    /** Il menu di questa casella è aperto. */
+    var active: Boolean = false
+        set(v) { field = v; refresh() }
+
+    /** Casella non utilizzabile in questo momento (es. fps in modalità foto). */
+    var dimmed: Boolean = false
+        set(v) { field = v; refresh() }
+
+    init {
+        orientation = VERTICAL
+        gravity = android.view.Gravity.CENTER
+        isClickable = true
+        isFocusable = true
+        background = bg
+        addView(captionView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(valueView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            topMargin = (-1 * density).toInt()
+        })
+        refresh()
+    }
+
+    private fun refresh() {
+        bg.setColor(if (active) Color.argb(40, 255, 176, 32) else Color.TRANSPARENT)
+        valueView.setTextColor(if (active) accent else Color.WHITE)
+        alpha = if (dimmed) 0.35f else 1f
+        contentDescription = "$caption $value"
+    }
+}

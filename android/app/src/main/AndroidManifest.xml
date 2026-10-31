@@ -5,6 +5,8 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Solo per controllare se su GitHub c'è una versione nuova -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Taglio dei video in sottofondo, con notifica, anche ad app chiusa -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -48,5 +50,10 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+        <activity
+            android:name=".ViewerActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.DualFrame" />
     </application>
 </manifest>

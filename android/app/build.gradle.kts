@@ -11,8 +11,8 @@ android {
         applicationId = "com.dualframe.cam"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     // Stessa chiave per ogni build (qui e su GitHub): così ogni nuovo APK si installa
@@ -43,6 +43,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+    buildFeatures {
+        buildConfig = true
     }
     lint {
         abortOnError = false

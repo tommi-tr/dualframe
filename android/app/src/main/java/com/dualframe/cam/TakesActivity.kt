@@ -103,7 +103,12 @@ class TakesActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        handler.post(refresh)
+        // Prima togli ciò che è stato cancellato dalla galleria, poi mostra l'elenco.
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { TakeStore.prune(applicationContext) }
+            lastSignature = ""
+            handler.post(refresh)
+        }
     }
 
     override fun onStop() {
@@ -116,7 +121,7 @@ class TakesActivity : ComponentActivity() {
             val self = this
             lifecycleScope.launch {
                 val takes = withContext(Dispatchers.IO) { TakeStore.all(applicationContext) }
-                val sig = takes.joinToString { "${it.id}:${it.status}:${it.photos.size}:${it.note}" }
+                val sig = takes.joinToString { "${it.id}:${it.status}:${it.photos.size}:${it.note}:${it.vertical?.uri}:${it.horizontal?.uri}" }
                 if (sig != lastSignature) {
                     lastSignature = sig
                     render(takes)
@@ -129,6 +134,7 @@ class TakesActivity : ComponentActivity() {
     private fun px(v: Int) = (v * dp).toInt()
 
     private val dateFmt = SimpleDateFormat("EEE d MMM, HH:mm:ss", Locale.ITALIAN)
+    private val shortDate = SimpleDateFormat("d MMM HH:mm:ss", Locale.ITALIAN)
 
     private fun render(takes: List<Take>) {
         list.removeAllViews()
@@ -216,14 +222,18 @@ class TakesActivity : ComponentActivity() {
         }
         val big = 110
         if (isVideo) {
-            row.addView(thumb(t.vertical, "9:16", true, big, t.status == "pending"))
+            val pr = t.vertical to t.horizontal
+            val ttl = "Video · " + shortDate.format(Date(t.createdAt))
+            row.addView(thumb(t.vertical, "9:16", true, big, t.status == "pending", pr, ttl))
             row.addView(View(this), LinearLayout.LayoutParams(px(8), 1))
-            row.addView(thumb(t.horizontal, "16:9", true, big, t.status == "pending"))
+            row.addView(thumb(t.horizontal, "16:9", true, big, t.status == "pending", pr, ttl))
         } else {
             val p = t.photos.firstOrNull()
-            row.addView(thumb(p?.vertical, "9:16", false, big, false))
+            val pr = p?.vertical to p?.horizontal
+            val ttl = "Foto · " + shortDate.format(Date(p?.time ?: t.createdAt))
+            row.addView(thumb(p?.vertical, "9:16", false, big, false, pr, ttl))
             row.addView(View(this), LinearLayout.LayoutParams(px(8), 1))
-            row.addView(thumb(p?.horizontal, "16:9", false, big, false))
+            row.addView(thumb(p?.horizontal, "16:9", false, big, false, pr, ttl))
         }
         box.addView(row)
 
@@ -239,9 +249,11 @@ class TakesActivity : ComponentActivity() {
             val pairs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             t.photos.forEachIndexed { i, p ->
                 if (i > 0) pairs.addView(View(this), LinearLayout.LayoutParams(px(14), 1))
-                pairs.addView(thumb(p.vertical, "9:16", false, 72, false))
+                val pr = p.vertical to p.horizontal
+                val ttl = "Foto dal video · " + shortDate.format(Date(p.time))
+                pairs.addView(thumb(p.vertical, "9:16", false, 72, false, pr, ttl))
                 pairs.addView(View(this), LinearLayout.LayoutParams(px(4), 1))
-                pairs.addView(thumb(p.horizontal, "16:9", false, 72, false))
+                pairs.addView(thumb(p.horizontal, "16:9", false, 72, false, pr, ttl))
             }
             hs.addView(pairs)
             box.addView(hs)
@@ -250,7 +262,8 @@ class TakesActivity : ComponentActivity() {
     }
 
     /** Miniatura con proporzioni reali (9:16 o 16:9) e altezza fissa. */
-    private fun thumb(ref: MediaRef?, label: String, video: Boolean, heightDp: Int, pending: Boolean): View {
+    private fun thumb(ref: MediaRef?, label: String, video: Boolean, heightDp: Int, pending: Boolean,
+                      pair: Pair<MediaRef?, MediaRef?>, title: String): View {
         val vertical = label == "9:16"
         val h = px(heightDp)
         val w = if (vertical) h * 9 / 16 else h * 16 / 9
@@ -291,13 +304,10 @@ class TakesActivity : ComponentActivity() {
                     }, FrameLayout.LayoutParams(w, h))
                 }
             }
+            // Apre il visore interno (con Galleria, Condividi, Cestina)
+            // Visore interno con le due versioni affiancate
             frame.setOnClickListener {
-                runCatching {
-                    startActivity(Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(Uri.parse(ref.uri), if (video) "video/*" else "image/*")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    })
-                }
+                startActivity(ViewerActivity.intent(this, pair.first, pair.second, video, title))
             }
             frame.contentDescription = "${if (video) "Video" else "Foto"} $label ${ref.name}"
         }

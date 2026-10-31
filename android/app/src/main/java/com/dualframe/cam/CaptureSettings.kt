@@ -59,6 +59,11 @@ class CaptureSettings(context: Context) {
             else prefs.edit().putFloat("lensZoom", v).apply()
         }
 
+    /** Livella (orizzonte) sul mirino. Di serie accesa. */
+    var level: Boolean
+        get() = prefs.getBoolean("level", true)
+        set(v) = prefs.edit().putBoolean("level", v).apply()
+
     var grid: Boolean
         get() = prefs.getBoolean("grid", false)
         set(v) = prefs.edit().putBoolean("grid", v).apply()
