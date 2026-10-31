@@ -11,16 +11,29 @@ android {
         applicationId = "com.dualframe.cam"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // Stessa chiave per ogni build (qui e su GitHub): così ogni nuovo APK si installa
+    // sopra il precedente senza disinstallare e senza perdere i video in attesa.
+    // È una chiave per uso personale: per il Play Store serve una chiave di rilascio vera.
+    signingConfigs {
+        create("cameraDual") {
+            storeFile = rootProject.file("keystore/camera-dual.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("cameraDual")
+        }
         release {
             isMinifyEnabled = false
-            // Firmato con la chiave di debug così l'APK è installabile subito.
-            // Per il Play Store sostituisci con la tua chiave di rilascio.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("cameraDual")
         }
     }
 

@@ -242,6 +242,10 @@ object TakeStore {
         write(context, list.map { if (it.id == id) change(t) else it })
     }
 
+    fun remove(context: Context, id: String) = synchronized(lock) {
+        write(context, all(context).filter { it.id != id })
+    }
+
     fun addPhoto(context: Context, takeId: String, pair: PhotoPair) =
         update(context, takeId) { it.copy(photos = it.photos + pair) }
 }

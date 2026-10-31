@@ -1,7 +1,13 @@
 package com.dualframe.cam
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.media.MediaMetadataRetriever
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.work.ForegroundInfo
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -39,6 +45,47 @@ object ExportScheduler {
  */
 class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
+    companion object {
+        private const val CHANNEL = "export"
+        private const val NOTIF_ID = 42
+    }
+
+    private fun foregroundInfo(text: String): ForegroundInfo {
+        val ctx = applicationContext
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm?.getNotificationChannel(CHANNEL) == null) {
+            nm?.createNotificationChannel(
+                NotificationChannel(CHANNEL, "Taglio dei video", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val n = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Camera Dual")
+            .setContentText(text)
+            .setOngoing(true)
+            .setSilent(true)
+            .setProgress(0, 0, true)
+            .build()
+        return if (Build.VERSION.SDK_INT >= 29) {
+            ForegroundInfo(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(NOTIF_ID, n)
+        }
+    }
+
+    override suspend fun getForegroundInfo(): ForegroundInfo = foregroundInfo("Taglio i video nei due formati…")
+
+    /** In primo piano (con notifica) il taglio non viene interrotto dopo 10 minuti né ad app chiusa. */
+    private suspend fun goForeground(text: String) {
+        try {
+            setForeground(foregroundInfo(text))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // Android non permette di partire in primo piano da sottofondo: prosegue come lavoro normale.
+        }
+    }
+
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         withContext(Dispatchers.IO) { PendingStore.recoverOrphans(ctx) }
@@ -51,6 +98,8 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val job = withContext(Dispatchers.IO) { PendingStore.list(ctx) }
                 .firstOrNull { it.state == "ready" && it.id !in tried } ?: break
             tried += job.id
+            val waiting = withContext(Dispatchers.IO) { PendingStore.list(ctx) }.count { it.state == "ready" }
+            goForeground(if (waiting > 1) "Taglio $waiting video nei due formati…" else "Taglio il video nei due formati…")
             // Il file potrebbe essere ancora in chiusura: riprova tra poco senza contarlo come errore.
             if (System.currentTimeMillis() - File(job.masterPath).lastModified() < 5000) {
                 failures++
@@ -141,13 +190,25 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             MediaSaver.saveVideo(ctx, master, "${MediaSaver.PREFIX}_${stamp(job)}_originale",
                 Folders.ORIGINALS, info.displayW, info.displayH)
         } else null
+        // Un file danneggiato non si butta: resta in Android/data/com.dualframe.cam/files/Danneggiati
+        // (raggiungibile dal computer) per un eventuale recupero con programmi appositi.
+        if (saved == null && master.exists() && master.length() > 0) {
+            runCatching {
+                val dir = ctx.getExternalFilesDir("Danneggiati")
+                if (dir != null) {
+                    dir.mkdirs()
+                    val dest = File(dir, "${MediaSaver.PREFIX}_${stamp(job)}_danneggiato.mp4")
+                    if (!master.renameTo(dest)) { master.copyTo(dest, overwrite = true) }
+                }
+            }
+        }
         TakeStore.update(ctx, job.id) {
             it.copy(
                 status = "failed",
                 vertical = job.done["9x16"] ?: it.vertical,
                 horizontal = job.done["16x9"] ?: it.horizontal,
                 note = if (saved != null) "Non sono riuscito a tagliarlo: l'originale 4:3 è in \"Camera Dual Originali\""
-                else "Video non recuperabile: $message"
+                else "Video danneggiato: il file grezzo è in Android/data/com.dualframe.cam/files/Danneggiati"
             )
         }
         PendingStore.remove(ctx, job)

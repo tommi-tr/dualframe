@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-            if (result[Manifest.permission.CAMERA] == true) startCamera() else showPermissionView()
+            if (hasPermission(Manifest.permission.CAMERA)) startCamera() else showPermissionView()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -183,7 +183,22 @@ class MainActivity : ComponentActivity() {
         }
 
         refreshUi()
-        if (hasPermission(Manifest.permission.CAMERA)) startCamera() else requestPermissions()
+        if (hasPermission(Manifest.permission.CAMERA)) {
+            startCamera()
+            askNotificationsOnce()
+        } else {
+            requestPermissions()
+        }
+    }
+
+    /** Chi aggiorna dalla versione precedente: chiede una sola volta il permesso per la notifica del taglio. */
+    private fun askNotificationsOnce() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return
+        if (hasPermission(Manifest.permission.POST_NOTIFICATIONS)) return
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (prefs.getBoolean("askedNotif", false)) return
+        prefs.edit().putBoolean("askedNotif", true).apply()
+        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
     }
 
     private fun bindViews() {
@@ -296,7 +311,10 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
     private fun requestPermissions() {
-        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+        val perms = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        // Per la notifica "Taglio i video…" mentre l'elaborazione continua ad app chiusa.
+        if (android.os.Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
+        permissionLauncher.launch(perms.toTypedArray())
     }
 
     private fun showPermissionView() {
@@ -800,8 +818,10 @@ class MainActivity : ComponentActivity() {
         val audio = hasPermission(Manifest.permission.RECORD_AUDIO)
         val ok = controller.startRecording(file, audio) { event -> onRecordEvent(event, job) }
         if (!ok) {
+            // La fotocamera è ancora occupata (es. sta chiudendo il video precedente): niente voce vuota nell'elenco.
             finishRecording(job, forced = true, failed = true)
-            showToast("Registrazione non disponibile")
+            TakeStore.remove(applicationContext, id)
+            showToast("Fotocamera occupata, riprova tra un attimo")
             return
         }
         // Se la fotocamera non parte entro 5 s, sblocca tutto.
