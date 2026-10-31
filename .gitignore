@@ -1,0 +1,4 @@
+build/
+*.ipa
+Payload/
+xcuserdata/
