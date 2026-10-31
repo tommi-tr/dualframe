@@ -9,7 +9,9 @@ class LensLabelTest {
     @Test
     fun labels() {
         assertEquals("0.5×", lens(0.5f).label)
-        assertEquals(".5", lens(0.5f).shortLabel)
+        assertEquals(".5×", lens(0.5f).shortLabel)
+        assertEquals("Int.", LensOption("1", null, 1f, emptyList(), 0f, front = true).shortLabel)
+        assertEquals(-1f, LensOption("1", null, 1f, emptyList(), 0f, front = true).memoKey)
         assertEquals("1×", lens(1.02f).label)
         assertEquals("1×", lens(1f).shortLabel)
         assertEquals("5×", lens(4.95f).label)

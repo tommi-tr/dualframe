@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var chipCodec: TextView
     private lateinit var chipFocus: TextView
     private lateinit var chipAperture: TextView
-    private lateinit var lensRow: LinearLayout
+    private lateinit var chipLens: TextView
     private lateinit var menuPanel: LinearLayout
     private lateinit var menuTitle: TextView
     private lateinit var menuOptions: LinearLayout
@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
         chipCodec.setOnClickListener { toggleMenu("codec") }
         chipFocus.setOnClickListener { toggleMenu("focus") }
         chipAperture.setOnClickListener { toggleMenu("aperture") }
+        chipLens.setOnClickListener { toggleMenu("lens") }
         btnFlash.setOnClickListener { cycleFlash() }
         btnGrid.setOnClickListener {
             settings.grid = !settings.grid
@@ -161,7 +162,8 @@ class MainActivity : ComponentActivity() {
         focusSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (!fromUser) return
-                controller.setManualFocus(progress / 1000f)
+                // Macro a sinistra, infinito a destra
+                controller.setManualFocus(1f - progress / 1000f)
                 overlay.focusMarker = null
                 refreshUi()
             }
@@ -217,7 +219,7 @@ class MainActivity : ComponentActivity() {
         chipCodec = findViewById(R.id.chipCodec)
         chipFocus = findViewById(R.id.chipFocus)
         chipAperture = findViewById(R.id.chipAperture)
-        lensRow = findViewById(R.id.lensRow)
+        chipLens = findViewById(R.id.chipLens)
         menuPanel = findViewById(R.id.menuPanel)
         menuTitle = findViewById(R.id.menuTitle)
         menuOptions = findViewById(R.id.menuOptions)
@@ -379,9 +381,11 @@ class MainActivity : ComponentActivity() {
         val video = mode == CameraController.Mode.VIDEO
         val rec = recordingActive
 
-        chipRes.text = (if (video) settings.videoRes.label else settings.photoRes.label) + " ▾"
-        chipFps.text = settings.fps.label + " ▾"
-        chipCodec.text = settings.codec.label + " ▾"
+        chipRes.text = if (video) settings.videoRes.label else settings.photoRes.label
+        chipFps.text = "${settings.fps.value}fps"
+        chipCodec.text = if (settings.codec == Codec.HEVC) "HEVC" else "H264"
+        chipLens.text = controller.lens?.shortLabel ?: "1×"
+        chipLens.setBackgroundResource(if (openMenu == "lens") R.drawable.bg_chip_active else R.drawable.bg_chip)
         chipFps.visibility = if (video) View.VISIBLE else View.GONE
         chipCodec.visibility = if (video) View.VISIBLE else View.GONE
         val resKey = if (video) "vres" else "pres"
@@ -390,12 +394,12 @@ class MainActivity : ComponentActivity() {
         chipCodec.setBackgroundResource(if (openMenu == "codec") R.drawable.bg_chip_active else R.drawable.bg_chip)
         chips.alpha = if (rec) 0.45f else 1f
 
-        chipFocus.text = "Fuoco " + when (controller.focusMode) {
-            CameraController.FocusMode.AUTO -> "AUTO"
-            CameraController.FocusMode.POINT -> "PUNTO"
-            CameraController.FocusMode.MANUAL -> "MAN"
-        } + " ▾"
-        chipAperture.text = (controller.currentAperture?.let { "f/" + fmtAperture(it) } ?: "f/–") + " ▾"
+        chipFocus.text = when (controller.focusMode) {
+            CameraController.FocusMode.AUTO -> "AF"
+            CameraController.FocusMode.POINT -> "AF·P"
+            CameraController.FocusMode.MANUAL -> "MF"
+        }
+        chipAperture.text = controller.currentAperture?.let { "f/" + fmtAperture(it) } ?: "f/–"
         chipFocus.setBackgroundResource(if (openMenu == "focus") R.drawable.bg_chip_active else R.drawable.bg_chip)
         chipAperture.setBackgroundResource(if (openMenu == "aperture") R.drawable.bg_chip_active else R.drawable.bg_chip)
 
@@ -472,8 +476,7 @@ class MainActivity : ComponentActivity() {
 
     private fun rotateIcons() {
         val r = iconRotation()
-        (listOf<View>(btnFlash, btnGrid, gallery, btnRecenter, btnSnap) +
-            (0 until lensRow.childCount).map { lensRow.getChildAt(it) }).forEach {
+        listOf<View>(btnFlash, btnGrid, gallery, btnRecenter, btnSnap).forEach {
             it.animate().rotation(r).setDuration(200).start()
         }
     }
@@ -533,8 +536,8 @@ class MainActivity : ComponentActivity() {
     private fun fmtAperture(f: Float) = String.format(Locale.US, "%.1f", f)
 
     private fun toggleMenu(key: String) {
-        if (recordingActive && key != "focus" && key != "aperture") {
-            showToast("Durante la ripresa puoi cambiare solo fuoco e diaframma")
+        if (recordingActive && key != "focus" && key != "aperture" && key != "lens") {
+            showToast("Durante la ripresa puoi cambiare solo lente, fuoco e diaframma")
             return
         }
         if (openMenu == key) {
@@ -576,6 +579,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             )
+            "lens" -> "Lente" to controller.lenses.map { o ->
+                val sub = when {
+                    o.front -> "interna"
+                    o.equivZoom < 0.8f -> "grandang."
+                    o.equivZoom < 1.45f -> "principale"
+                    else -> "tele"
+                }
+                Option(o.shortLabel, sub, o == controller.lens) { onLensSelected(o) }
+            }
             "aperture" -> "Diaframma · lente ${controller.zoomLabel}" to controller.apertures.map { f ->
                 Option("f/" + fmtAperture(f), if (controller.apertureSelectable) "" else "fisso",
                     f == controller.currentAperture) {
@@ -648,7 +660,7 @@ class MainActivity : ComponentActivity() {
         val showSeek = key == "focus" && controller.focusMode == CameraController.FocusMode.MANUAL &&
             controller.supportsManualFocus
         menuSeekRow.visibility = if (showSeek) View.VISIBLE else View.GONE
-        if (showSeek) focusSeek.progress = (controller.manualFocus * 1000).toInt()
+        if (showSeek) focusSeek.progress = ((1f - controller.manualFocus) * 1000).toInt()
 
         menuPanel.visibility = View.VISIBLE
         refreshUi()
@@ -664,27 +676,8 @@ class MainActivity : ComponentActivity() {
     // ---------- Lenti e messa a fuoco ----------
 
     private fun buildLensRow() {
-        lensRow.removeAllViews()
-        val lenses = controller.lenses
-        lensRow.visibility = if (lenses.isEmpty()) View.GONE else View.VISIBLE
-        val size = (30 * dp).toInt()
-        lenses.forEachIndexed { i, o ->
-            val selected = o == controller.lens
-            val tv = TextView(this).apply {
-                text = if (selected) o.label else o.shortLabel
-                gravity = Gravity.CENTER
-                textSize = if (selected) 10f else 10f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(if (selected) accent else Color.WHITE)
-                setBackgroundResource(if (selected) R.drawable.bg_lens_selected else R.drawable.bg_lens)
-                contentDescription = "${o.label} ${o.name}"
-                rotation = iconRotation()
-                setOnClickListener { onLensSelected(o) }
-            }
-            val lp = LinearLayout.LayoutParams(size, size)
-            if (i > 0) lp.marginStart = (4 * dp).toInt()
-            lensRow.addView(tv, lp)
-        }
+        chipLens.visibility = if (controller.lenses.isEmpty()) View.GONE else View.VISIBLE
+        refreshUi()
     }
 
     private fun onLensSelected(o: LensOption) {
@@ -694,14 +687,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         val needRebind = controller.selectLens(o)
-        settings.lensZoom = o.equivZoom
+        settings.lensZoom = o.memoKey
         if (needRebind) rebind()
         if (controller.focusMode == CameraController.FocusMode.POINT && !controller.hasFocus) {
             controller.setAutoFocus()
             overlay.focusMarker = null
         }
         buildLensRow()
-        openMenu?.let { k ->
+        if (openMenu != null && openMenu != "lens") {
+            val k = openMenu!!
             openMenu = null
             toggleMenu(k)
         }
@@ -741,9 +735,9 @@ class MainActivity : ComponentActivity() {
 
     private fun takePhoto() {
         flashScreen()
-        val primary = overlay.primaryRect()
-        val secondary = overlay.secondaryRect()
-        val a = if (recordingActive) recAngle else angle
+        val primary = cap(overlay.primaryRect())
+        val secondary = cap(overlay.secondaryRect())
+        val a = capAngle(if (recordingActive) recAngle else angle)
         val duringVideo = recordingActive
         val videoTakeId = currentJob?.id
         val maxLong = settings.photoRes.maxLongSide
@@ -792,12 +786,12 @@ class MainActivity : ComponentActivity() {
         val file = PendingStore.newMasterFile(this, id)
         recAngle = angle
         overlay.deviceAngle = recAngle
-        val pt = CropTrack().also { it.add(0, overlay.primaryRect()) }
-        val st = CropTrack().also { it.add(0, overlay.secondaryRect()) }
+        val pt = CropTrack().also { it.add(0, cap(overlay.primaryRect())) }
+        val st = CropTrack().also { it.add(0, cap(overlay.secondaryRect())) }
         primaryTrack = pt
         secondaryTrack = st
         val job = PendingJob(
-            id = id, masterPath = file.absolutePath, angle = recAngle, codec = settings.codec,
+            id = id, masterPath = file.absolutePath, angle = capAngle(recAngle), codec = settings.codec,
             maxLongSide = settings.videoRes.maxLongSide, fps = controller.activeFps,
             lensLabel = controller.zoomLabel, createdAt = System.currentTimeMillis(),
             primaryTrack = pt, secondaryTrack = st, state = "recording"
@@ -895,8 +889,8 @@ class MainActivity : ComponentActivity() {
             val app = applicationContext
             if (usable) {
                 val now = (SystemClock.elapsedRealtimeNanos() - recStartNs) / 1000
-                primaryTrack?.add(now, overlay.primaryRect())
-                secondaryTrack?.add(now, overlay.secondaryRect())
+                primaryTrack?.add(now, cap(overlay.primaryRect()))
+                secondaryTrack?.add(now, cap(overlay.secondaryRect()))
                 val ready = job.copy(
                     primaryTrack = (primaryTrack ?: job.primaryTrack).snapshot(),
                     secondaryTrack = (secondaryTrack ?: job.secondaryTrack).snapshot(),
@@ -919,11 +913,21 @@ class MainActivity : ComponentActivity() {
         refreshUi()
     }
 
+    /**
+     * Rettangolo da usare sul file: con la fotocamera interna l'anteprima è a specchio
+     * mentre foto e video no, quindi il ritaglio va ribaltato.
+     */
+    private fun cap(r: NormRect): NormRect =
+        if (controller.isFront) NormRect(1f - r.right, r.top, 1f - r.left, r.bottom) else r
+
+    /** Con l'immagine a specchio anche la rotazione per raddrizzarla va al contrario. */
+    private fun capAngle(a: Int): Int = if (controller.isFront) (360 - a) % 360 else a
+
     private fun onFramesMoved() {
         if (recordingActive) {
             val t = (SystemClock.elapsedRealtimeNanos() - recStartNs) / 1000
-            primaryTrack?.add(t, overlay.primaryRect())
-            secondaryTrack?.add(t, overlay.secondaryRect())
+            primaryTrack?.add(t, cap(overlay.primaryRect()))
+            secondaryTrack?.add(t, cap(overlay.secondaryRect()))
         }
     }
 }

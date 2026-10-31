@@ -30,20 +30,29 @@ data class LensOption(
     /** Distanza minima di messa a fuoco in diottrie (0 = fuoco fisso). */
     val minFocusDiopters: Float,
     /** true se diaframma e fuoco minimo vengono dalla lente fisica vera. */
-    val physical: Boolean = true
+    val physical: Boolean = true,
+    /** Fotocamera interna (selfie). */
+    val front: Boolean = false
 ) {
     val label: String
         get() {
+            if (front) return "Interna"
             val z = equivZoom
             return if (z < 1f) String.format(Locale.US, "%.1f×", z)
             else if (abs(z - z.roundToInt()) < 0.12f) "${z.roundToInt()}×"
             else String.format(Locale.US, "%.1f×", z)
         }
 
-    val shortLabel: String get() = label.removePrefix("0").removeSuffix("×").let { if (equivZoom >= 1f) "$it×" else it }
+    /** Etichetta corta per il chip in alto: ".5×", "1×", "3×", "Int." */
+    val shortLabel: String
+        get() = if (front) "Int." else label.removePrefix("0")
+
+    /** Valore da ricordare tra un avvio e l'altro (-1 = interna). */
+    val memoKey: Float get() = if (front) -1f else equivZoom
 
     val name: String
         get() = when {
+            front -> "Fotocamera interna"
             equivZoom < 0.8f -> "Grandangolo"
             equivZoom < 1.45f -> "Principale"
             else -> "Teleobiettivo"
@@ -85,6 +94,19 @@ object LensCatalog {
     /** Elenco delle lenti posteriori, ordinate dalla più ampia alla più stretta. */
     fun build(context: Context, provider: ProcessCameraProvider): List<LensOption> {
         val mgr = context.getSystemService(CameraManager::class.java) ?: return emptyList()
+        val back = runCatching { buildBack(mgr, provider) }.getOrDefault(emptyList())
+        // La fotocamera interna, per girare verso di sé.
+        val front = provider.availableCameraInfos.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+            ?.let { info ->
+                val id = Camera2CameraInfo.from(info).cameraId
+                val ch = runCatching { mgr.getCameraCharacteristics(id) }.getOrNull()
+                LensOption(id, null, 1f, ch?.let { apertures(it) } ?: emptyList(),
+                    ch?.let { minFocus(it) } ?: 0f, physical = true, front = true)
+            }
+        return back + listOfNotNull(front)
+    }
+
+    private fun buildBack(mgr: CameraManager, provider: ProcessCameraProvider): List<LensOption> {
         val backs = provider.availableCameraInfos.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
         if (backs.isEmpty()) return emptyList()
 

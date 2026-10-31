@@ -1,21 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Stile Fotocamera Fairphone: verde scuro pieno, anello lime al centro -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- 9:16 grafite -->
-    <path android:fillColor="#00000000" android:strokeColor="#FF3F3E46" android:strokeWidth="3.5"
-        android:pathData="M43,30h22v48h-22z"/>
-    <!-- 16:9 blu -->
-    <path android:fillColor="#00000000" android:strokeColor="#FF2B71C6" android:strokeWidth="3.5"
-        android:pathData="M30,42.5h48v23h-48z"/>
-    <!-- cerchietto centrale: obiettivo con riflessi blu e viola -->
-    <path android:fillColor="#FFECEFF4" android:pathData="M54,46a8,8 0,1 1,0 16a8,8 0,1 1,0 -16z"/>
-    <path android:fillColor="#FF16171B" android:pathData="M54,47.5a6.5,6.5 0,1 1,0 13a6.5,6.5 0,1 1,0 -13z"/>
-    <path android:pathData="M54,50a4,4 0,1 1,0 8a4,4 0,1 1,0 -8z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="54" android:centerY="54" android:gradientRadius="4"
-                android:startColor="#FF358AE7" android:centerColor="#FF2B71C6" android:endColor="#FF5C255C"/>
-        </aapt:attr>
-    </path>
-    <path android:fillColor="#CCFFFFFF" android:pathData="M52.3,51.4a1,1 0,1 1,0 2a1,1 0,1 1,0 -2z"/>
+    <!-- 16:9 contorno -->
+    <path android:fillColor="#00000000" android:strokeColor="#FF004137" android:strokeWidth="3.5"
+        android:pathData="M32,42h44a3,3 0,0 1,3 3v18a3,3 0,0 1,-3 3h-44a3,3 0,0 1,-3 -3v-18a3,3 0,0 1,3 -3z"/>
+    <!-- 9:16 pieno -->
+    <path android:fillColor="#FF004137"
+        android:pathData="M45.5,28h17a3.5,3.5 0,0 1,3.5 3.5v45a3.5,3.5 0,0 1,-3.5 3.5h-17a3.5,3.5 0,0 1,-3.5 -3.5v-45a3.5,3.5 0,0 1,3.5 -3.5z"/>
+    <!-- tracce del 16:9 sopra il 9:16 -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFEBEBE9" android:strokeWidth="1.6"
+        android:pathData="M42,43.75h24M42,64.25h24"/>
+    <!-- anello lime -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFD2FC50" android:strokeWidth="3"
+        android:pathData="M54,47.5a6.5,6.5 0,1 1,0 13a6.5,6.5 0,1 1,0 -13z"/>
 </vector>

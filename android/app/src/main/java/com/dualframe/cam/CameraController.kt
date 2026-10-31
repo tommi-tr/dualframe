@@ -78,6 +78,9 @@ class CameraController(
 
     val zoomLabel: String get() = lens?.label ?: "1×"
 
+    /** Con la fotocamera interna l'anteprima è a specchio, le foto e i video no. */
+    val isFront: Boolean get() = lens?.front == true
+
     /** fps effettivamente usati (può differire da quelli richiesti se non supportati). */
     var activeFps: Int = 30
         private set
@@ -126,7 +129,9 @@ class CameraController(
             lenses = runCatching { LensCatalog.build(activity, p) }.getOrDefault(emptyList())
             lens = when {
                 lenses.isEmpty() -> null
-                preferredZoom != null -> lenses.minByOrNull { abs(ln(it.equivZoom / preferredZoom)) }
+                preferredZoom != null && preferredZoom < 0f -> lenses.firstOrNull { it.front } ?: lenses.first()
+                preferredZoom != null -> lenses.filter { !it.front }.minByOrNull { abs(ln(it.equivZoom / preferredZoom)) }
+                    ?: lenses.first()
                 else -> lenses.first() // il grandangolo
             }
             updateSelector()
@@ -139,7 +144,7 @@ class CameraController(
         val id = lens?.cameraId ?: return
         chosenInfo = p.availableCameraInfos.firstOrNull { Camera2CameraInfo.from(it).cameraId == id }
         selector = CameraSelector.Builder()
-            .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+            .requireLensFacing(if (lens?.front == true) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
             .addCameraFilter { infos -> infos.filter { Camera2CameraInfo.from(it).cameraId == id } }
             .build()
     }

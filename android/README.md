@@ -13,9 +13,10 @@ Apri `CameraDual.apk` sul telefono (Android 10 o successivo) e consenti l'instal
 La schermata **Ultimi scatti** (miniatura in basso a sinistra) elenca le riprese con data, durata, impostazioni e nomi dei file. Le miniature dei due formati e delle foto scattate durante il video sono affiancate.
 
 ## Come si usa
-- **In alto** trovi tutte le impostazioni: flash, risoluzione, fps, codec, griglia; nella seconda riga la lente (.5, 1×, …), il fuoco e il diaframma.
+- **In alto**, su una sola riga: flash, lente (con la fotocamera interna), risoluzione, fps, codec, fuoco, diaframma e griglia. Tocca un valore per cambiarlo.
 - **Tocca** il mirino per spostare lì il riquadro colorato e **trascina** per muoverlo. **Pizzica** su uno dei due riquadri per ridimensionarlo. Il riquadro bianco si sposta con la sua maniglia.
-- **Tieni premuto** per bloccare fuoco ed esposizione su un punto.
+- **Tieni premuto** per bloccare fuoco ed esposizione su un punto. Nel fuoco manuale lo slider va da macro (a sinistra) a infinito (a destra).
+- Il tasto in basso a destra (i due riquadri sovrapposti) riporta i riquadri nella posizione predefinita.
 - Durante il video lo sfondo diventa **rosso scuro**. Il tasto per le foto sta a sinistra quando tieni il telefono in verticale, e in alto quando lo tieni in orizzontale.
 
 ## Registrazione sicura
