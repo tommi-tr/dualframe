@@ -1,10 +1,13 @@
-name: Build IPA
+name: iOS – Build IPA (manuale)
+# Solo su richiesta (Actions › Run workflow): i Mac di GitHub consumano più minuti gratuiti.
 on:
-  push:
   workflow_dispatch:
 jobs:
   build:
     runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
     steps:
       - uses: actions/checkout@v4
       - name: Xcode version
@@ -25,9 +28,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: DualFrame-ipa
-          path: DualFrame.ipa
+          path: ios/DualFrame.ipa
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: build-log
-          path: build.log
+          name: ios-build-log
+          path: ios/build.log

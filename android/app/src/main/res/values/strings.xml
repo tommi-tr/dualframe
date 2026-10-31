@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Camera Dual</string>
+    <string name="takes_title">Ultimi scatti</string>
+    <string name="mode_photo">FOTO</string>
+    <string name="mode_video">VIDEO</string>
+    <string name="permission_text">Per riprendere servono la fotocamera e il microfono.</string>
+    <string name="permission_button">Consenti accesso</string>
+    <string name="cd_flash">Flash</string>
+    <string name="cd_grid">Griglia</string>
+    <string name="cd_gallery">Galleria</string>
+    <string name="cd_shutter">Scatto</string>
+    <string name="cd_recenter">Ricentra il riquadro</string>
+    <string name="cd_snap">Scatta foto durante il video</string>
+</resources>

@@ -1,0 +1,909 @@
+package com.dualframe.cam
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.PointF
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
+import android.util.Size
+import android.view.Gravity
+import android.view.OrientationEventListener
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.SeekBar
+import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraState
+import androidx.camera.video.VideoRecordEvent
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.Locale
+
+class MainActivity : ComponentActivity() {
+
+    private lateinit var root: FrameLayout
+    private lateinit var viewfinder: AspectFrameLayout
+    private lateinit var previewView: PreviewView
+    private lateinit var overlay: FrameOverlayView
+    private lateinit var flashView: View
+    private lateinit var statusChip: TextView
+    private lateinit var topBar: LinearLayout
+    private lateinit var btnFlash: ImageButton
+    private lateinit var btnGrid: ImageButton
+    private lateinit var chips: LinearLayout
+    private lateinit var chipRes: TextView
+    private lateinit var chipFps: TextView
+    private lateinit var chipCodec: TextView
+    private lateinit var chipFocus: TextView
+    private lateinit var chipAperture: TextView
+    private lateinit var lensRow: LinearLayout
+    private lateinit var menuPanel: LinearLayout
+    private lateinit var menuTitle: TextView
+    private lateinit var menuOptions: LinearLayout
+    private lateinit var menuSeekRow: LinearLayout
+    private lateinit var focusSeek: SeekBar
+    private lateinit var menuNote: TextView
+    private lateinit var toastView: TextView
+    private lateinit var bottomBar: LinearLayout
+    private lateinit var processing: TextView
+    private lateinit var modeRow: LinearLayout
+    private lateinit var modePhoto: TextView
+    private lateinit var modeVideo: TextView
+    private lateinit var gallery: ImageView
+    private lateinit var shutter: ShutterButton
+    private lateinit var btnRecenter: ImageButton
+    private lateinit var btnSnap: ImageButton
+    private lateinit var permissionView: LinearLayout
+
+    private lateinit var settings: CaptureSettings
+    private lateinit var controller: CameraController
+    private lateinit var orientationListener: OrientationEventListener
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var mode = CameraController.Mode.PHOTO
+    private var angle = 0
+    private var openMenu: String? = null
+    private var cameraStarted = false
+    private var observedCamera: Camera? = null
+
+    // ---- Stato della ripresa ----
+    private var recordingActive = false
+    private var recAngle = 0
+    private var recStartNs = 0L
+    private var recSeconds = 0L
+    private var currentJob: PendingJob? = null
+    private var primaryTrack: CropTrack? = null
+    private var secondaryTrack: CropTrack? = null
+    private var pendingCount = 0
+
+    private val accent by lazy { ContextCompat.getColor(this, R.color.accent) }
+    private val dp by lazy { resources.displayMetrics.density }
+
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result[Manifest.permission.CAMERA] == true) startCamera() else showPermissionView()
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        setContentView(R.layout.activity_main)
+        bindViews()
+
+        settings = CaptureSettings(this)
+        controller = CameraController(this, previewView)
+        controller.onBound = { cam -> observeCamera(cam) }
+
+        previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            topBar.setPadding((12 * dp).toInt(), bars.top, (12 * dp).toInt(), (6 * dp).toInt())
+            bottomBar.setPadding(0, 0, 0, bars.bottom + (12 * dp).toInt())
+            topBar.post { layoutBelowTopBar() }
+            insets
+        }
+
+        overlay.accent = accent
+        overlay.onChanged = { onFramesMoved() }
+        overlay.onTap = { _, _ -> closeMenu() }
+        overlay.onLongPress = { x, y -> setFocusPoint(x, y) }
+
+        shutter.setOnClickListener { onShutter() }
+        btnSnap.setOnClickListener { takePhoto() }
+        btnRecenter.setOnClickListener { overlay.recenter() }
+        modePhoto.setOnClickListener { setMode(CameraController.Mode.PHOTO) }
+        modeVideo.setOnClickListener { setMode(CameraController.Mode.VIDEO) }
+        chipRes.setOnClickListener { toggleMenu(if (mode == CameraController.Mode.VIDEO) "vres" else "pres") }
+        chipFps.setOnClickListener { toggleMenu("fps") }
+        chipCodec.setOnClickListener { toggleMenu("codec") }
+        chipFocus.setOnClickListener { toggleMenu("focus") }
+        chipAperture.setOnClickListener { toggleMenu("aperture") }
+        btnFlash.setOnClickListener { cycleFlash() }
+        btnGrid.setOnClickListener {
+            settings.grid = !settings.grid
+            refreshUi()
+        }
+        gallery.setOnClickListener { startActivity(Intent(this, TakesActivity::class.java)) }
+        findViewById<Button>(R.id.btnPermission).setOnClickListener { requestPermissions() }
+        focusSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                controller.setManualFocus(progress / 1000f)
+                overlay.focusMarker = null
+                refreshUi()
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) {}
+            override fun onStopTrackingTouch(bar: SeekBar) {}
+        })
+
+        orientationListener = object : OrientationEventListener(this) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val snapped = FrameMath.snapOrientation(orientation, angle)
+                if (snapped != angle) {
+                    angle = snapped
+                    if (!recordingActive) overlay.deviceAngle = angle
+                    rotateIcons()
+                    refreshUi()
+                }
+            }
+        }
+
+        refreshUi()
+        if (hasPermission(Manifest.permission.CAMERA)) startCamera() else requestPermissions()
+    }
+
+    private fun bindViews() {
+        root = findViewById(R.id.root)
+        viewfinder = findViewById(R.id.viewfinder)
+        previewView = findViewById(R.id.previewView)
+        overlay = findViewById(R.id.overlay)
+        flashView = findViewById(R.id.flashView)
+        statusChip = findViewById(R.id.statusChip)
+        topBar = findViewById(R.id.topBar)
+        btnFlash = findViewById(R.id.btnFlash)
+        btnGrid = findViewById(R.id.btnGrid)
+        chips = findViewById(R.id.chips)
+        chipRes = findViewById(R.id.chipRes)
+        chipFps = findViewById(R.id.chipFps)
+        chipCodec = findViewById(R.id.chipCodec)
+        chipFocus = findViewById(R.id.chipFocus)
+        chipAperture = findViewById(R.id.chipAperture)
+        lensRow = findViewById(R.id.lensRow)
+        menuPanel = findViewById(R.id.menuPanel)
+        menuTitle = findViewById(R.id.menuTitle)
+        menuOptions = findViewById(R.id.menuOptions)
+        menuSeekRow = findViewById(R.id.menuSeekRow)
+        focusSeek = findViewById(R.id.focusSeek)
+        menuNote = findViewById(R.id.menuNote)
+        toastView = findViewById(R.id.toast)
+        bottomBar = findViewById(R.id.bottomBar)
+        processing = findViewById(R.id.processing)
+        modeRow = findViewById(R.id.modeRow)
+        modePhoto = findViewById(R.id.modePhoto)
+        modeVideo = findViewById(R.id.modeVideo)
+        gallery = findViewById(R.id.gallery)
+        shutter = findViewById(R.id.shutter)
+        btnRecenter = findViewById(R.id.btnRecenter)
+        btnSnap = findViewById(R.id.btnSnap)
+        permissionView = findViewById(R.id.permissionView)
+    }
+
+    private fun layoutBelowTopBar() {
+        val h = topBar.height
+        viewfinder.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h }
+        menuPanel.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h }
+        toastView.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h + (44 * dp).toInt() }
+    }
+
+    // ---------- Ciclo di vita ----------
+
+    override fun onStart() {
+        super.onStart()
+        // Se la ripresa si era interrotta mentre l'app era in sottofondo, chiudila per bene.
+        if (recordingActive && !controller.isRecording) finishRecording(null, forced = true)
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { PendingStore.recoverOrphans(applicationContext) }
+            ExportScheduler.kick(applicationContext)
+            refreshPending()
+            loadGalleryThumb()
+        }
+        handler.post(pendingPoll)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        orientationListener.enable()
+    }
+
+    override fun onPause() {
+        orientationListener.disable()
+        super.onPause()
+    }
+
+    override fun onStop() {
+        handler.removeCallbacks(pendingPoll)
+        // Uscendo dall'app la ripresa si chiude e il video viene salvato.
+        if (recordingActive || controller.isRecording) requestStop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        if (recordingActive || controller.isRecording) {
+            controller.stopRecording()
+            finishRecording(null, forced = true)
+        }
+        controller.shutdown()
+        super.onDestroy()
+    }
+
+    private val pendingPoll = object : Runnable {
+        override fun run() {
+            lifecycleScope.launch { refreshPending() }
+            handler.postDelayed(this, 2000)
+        }
+    }
+
+    private suspend fun refreshPending() {
+        val n = withContext(Dispatchers.IO) {
+            PendingStore.list(applicationContext).count { it.state == "ready" }
+        }
+        if (n != pendingCount) {
+            val finished = n < pendingCount
+            pendingCount = n
+            updateProcessing()
+            if (finished) loadGalleryThumb()
+        }
+    }
+
+    // ---------- Permessi ----------
+
+    private fun hasPermission(p: String) =
+        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestPermissions() {
+        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+    }
+
+    private fun showPermissionView() {
+        permissionView.visibility = View.VISIBLE
+    }
+
+    private fun startCamera() {
+        permissionView.visibility = View.GONE
+        if (cameraStarted) return
+        cameraStarted = true
+        controller.start(settings.lensZoom) {
+            buildLensRow()
+            rebind()
+        }
+    }
+
+    private fun rebind() {
+        if (recordingActive || controller.isRecording) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) return
+        val ok = try {
+            controller.bind(mode, settings.fps.value, settings.flash)
+        } catch (e: Exception) {
+            false
+        }
+        if (!ok) {
+            showToast("Fotocamera non disponibile")
+        } else if (mode == CameraController.Mode.VIDEO && controller.activeFps != settings.fps.value) {
+            showToast("${settings.fps.value} fps non supportati da questa lente: uso ${controller.activeFps} fps")
+        }
+        refreshUi()
+    }
+
+    /** Se un'altra app prende la fotocamera durante la ripresa, il video viene chiuso e salvato. */
+    private fun observeCamera(cam: Camera) {
+        observedCamera?.cameraInfo?.cameraState?.removeObservers(this)
+        observedCamera = cam
+        cam.cameraInfo.cameraState.observe(this) { state ->
+            val closed = state.type == CameraState.Type.CLOSED || state.type == CameraState.Type.CLOSING ||
+                state.type == CameraState.Type.PENDING_OPEN
+            if (closed && (recordingActive || controller.isRecording)) requestStop()
+            val err = state.error
+            if (err != null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                when (err.code) {
+                    CameraState.ERROR_CAMERA_IN_USE, CameraState.ERROR_MAX_CAMERAS_IN_USE ->
+                        showToast("La fotocamera è usata da un'altra app")
+                    CameraState.ERROR_CAMERA_DISABLED -> showToast("Fotocamera disattivata dal sistema")
+                }
+            }
+        }
+    }
+
+    // ---------- Interfaccia ----------
+
+    private fun setMode(m: CameraController.Mode) {
+        if (recordingActive || m == mode) return
+        mode = m
+        closeMenu()
+        rebind()
+    }
+
+    private fun refreshUi() {
+        val video = mode == CameraController.Mode.VIDEO
+        val rec = recordingActive
+
+        chipRes.text = (if (video) settings.videoRes.label else settings.photoRes.label) + " ▾"
+        chipFps.text = settings.fps.label + " ▾"
+        chipCodec.text = settings.codec.label + " ▾"
+        chipFps.visibility = if (video) View.VISIBLE else View.GONE
+        chipCodec.visibility = if (video) View.VISIBLE else View.GONE
+        val resKey = if (video) "vres" else "pres"
+        chipRes.setBackgroundResource(if (openMenu == resKey) R.drawable.bg_chip_active else R.drawable.bg_chip)
+        chipFps.setBackgroundResource(if (openMenu == "fps") R.drawable.bg_chip_active else R.drawable.bg_chip)
+        chipCodec.setBackgroundResource(if (openMenu == "codec") R.drawable.bg_chip_active else R.drawable.bg_chip)
+        chips.alpha = if (rec) 0.45f else 1f
+
+        chipFocus.text = "Fuoco " + when (controller.focusMode) {
+            CameraController.FocusMode.AUTO -> "AUTO"
+            CameraController.FocusMode.POINT -> "PUNTO"
+            CameraController.FocusMode.MANUAL -> "MAN"
+        } + " ▾"
+        chipAperture.text = (controller.currentAperture?.let { "f/" + fmtAperture(it) } ?: "f/–") + " ▾"
+        chipFocus.setBackgroundResource(if (openMenu == "focus") R.drawable.bg_chip_active else R.drawable.bg_chip)
+        chipAperture.setBackgroundResource(if (openMenu == "aperture") R.drawable.bg_chip_active else R.drawable.bg_chip)
+
+        modePhoto.setTextColor(if (!video) accent else Color.rgb(214, 211, 209))
+        modeVideo.setTextColor(if (video) accent else Color.rgb(214, 211, 209))
+        modeRow.visibility = if (rec) View.INVISIBLE else View.VISIBLE
+
+        // Sfondo rosso scuro sopra e sotto mentre si registra
+        val bg = ContextCompat.getColor(this, if (rec) R.color.rec_bg else R.color.bg)
+        root.setBackgroundColor(bg)
+        topBar.setBackgroundColor(bg)
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = bg
+
+        val secLabel = FrameMath.secondaryLabel(if (rec) recAngle else angle)
+        if (rec) {
+            statusChip.setBackgroundResource(R.drawable.bg_pill_rec)
+            statusChip.text = String.format(Locale.US, "● REC  %02d:%02d", recSeconds / 60, recSeconds % 60)
+            statusChip.typeface = Typeface.MONOSPACE
+            statusChip.textSize = 13f
+        } else {
+            statusChip.setBackgroundResource(R.drawable.bg_pill_overlay)
+            statusChip.text = "Tocca: sposta il $secLabel · Pizzica: ridimensiona · Tieni premuto: fuoco"
+            statusChip.typeface = Typeface.DEFAULT_BOLD
+            statusChip.textSize = 10f
+        }
+
+        shutter.style = when {
+            rec -> ShutterButton.Style.RECORDING
+            video -> ShutterButton.Style.VIDEO
+            else -> ShutterButton.Style.PHOTO
+        }
+        gallery.visibility = if (rec) View.INVISIBLE else View.VISIBLE
+        btnRecenter.visibility = if (rec) View.GONE else View.VISIBLE
+        btnSnap.visibility = if (rec) View.VISIBLE else View.GONE
+        // Tasto foto durante il video: a sinistra in verticale; in orizzontale resta in alto (per chi guarda).
+        val snapGravity = (if (angle == 270) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+        if ((btnSnap.layoutParams as FrameLayout.LayoutParams).gravity != snapGravity) {
+            btnSnap.updateLayoutParams<FrameLayout.LayoutParams> { gravity = snapGravity }
+        }
+
+        btnFlash.setImageResource(
+            when (settings.flash) {
+                FlashMode.OFF -> R.drawable.ic_flash_off
+                FlashMode.AUTO -> R.drawable.ic_flash_auto
+                FlashMode.ON -> R.drawable.ic_flash_on
+            }
+        )
+        btnFlash.alpha = if (controller.camera == null || controller.hasFlash) 1f else 0.4f
+        btnGrid.alpha = if (settings.grid) 1f else 0.55f
+        overlay.showGrid = settings.grid
+    }
+
+    private fun updateProcessing() {
+        if (pendingCount <= 0) {
+            processing.visibility = View.GONE
+            return
+        }
+        val n = pendingCount
+        processing.text = when {
+            recordingActive -> "$n video da tagliare dopo la ripresa"
+            n == 1 -> "Taglio 1 video nei due formati…"
+            else -> "Taglio $n video nei due formati…"
+        }
+        processing.visibility = View.VISIBLE
+    }
+
+    private fun iconRotation() = when (angle) {
+        90 -> -90f
+        180 -> 180f
+        270 -> 90f
+        else -> 0f
+    }
+
+    private fun rotateIcons() {
+        val r = iconRotation()
+        (listOf<View>(btnFlash, btnGrid, gallery, btnRecenter, btnSnap) +
+            (0 until lensRow.childCount).map { lensRow.getChildAt(it) }).forEach {
+            it.animate().rotation(r).setDuration(200).start()
+        }
+    }
+
+    private fun showToast(msg: String) {
+        toastView.text = msg
+        toastView.visibility = View.VISIBLE
+        toastView.removeCallbacks(hideToast)
+        toastView.postDelayed(hideToast, 1800)
+    }
+
+    private val hideToast = Runnable { toastView.visibility = View.GONE }
+
+    private fun flashScreen() {
+        flashView.animate().cancel()
+        flashView.alpha = 0.85f
+        flashView.animate().alpha(0f).setDuration(220).start()
+    }
+
+    private fun cycleFlash() {
+        settings.flash = when (settings.flash) {
+            FlashMode.OFF -> FlashMode.AUTO
+            FlashMode.AUTO -> FlashMode.ON
+            FlashMode.ON -> FlashMode.OFF
+        }
+        if (!controller.hasFlash && controller.camera != null) {
+            showToast("Questa lente non ha il flash")
+        }
+        if (recordingActive) controller.setTorch(settings.flash == FlashMode.ON) else rebind()
+        refreshUi()
+    }
+
+    private fun loadGalleryThumb() {
+        lifecycleScope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                val take = TakeStore.all(applicationContext).firstOrNull() ?: return@withContext null
+                val ref = take.vertical ?: take.horizontal ?: take.photos.lastOrNull()?.let { it.vertical ?: it.horizontal }
+                    ?: return@withContext null
+                runCatching {
+                    contentResolver.loadThumbnail(Uri.parse(ref.uri), Size(160, 160), null)
+                }.getOrNull()
+            }
+            if (bmp != null) gallery.setImageBitmap(bmp)
+        }
+    }
+
+    // ---------- Menu caratteristiche ripresa ----------
+
+    private data class Option(
+        val label: String,
+        val sub: String,
+        val selected: Boolean,
+        val keepOpen: Boolean = false,
+        val apply: () -> Unit
+    )
+
+    private fun fmtAperture(f: Float) = String.format(Locale.US, "%.1f", f)
+
+    private fun toggleMenu(key: String) {
+        if (recordingActive && key != "focus" && key != "aperture") {
+            showToast("Durante la ripresa puoi cambiare solo fuoco e diaframma")
+            return
+        }
+        if (openMenu == key) {
+            closeMenu()
+            return
+        }
+        openMenu = key
+        val (title, options) = when (key) {
+            "vres" -> "Risoluzione video (per ogni formato)" to VideoRes.entries.map { v ->
+                Option(v.label, v.sub, v == settings.videoRes) { settings.videoRes = v }
+            }
+            "pres" -> "Risoluzione foto (lato lungo)" to PhotoRes.entries.map { v ->
+                Option(v.label, v.sub, v == settings.photoRes) { settings.photoRes = v }
+            }
+            "fps" -> "Fotogrammi al secondo" to Fps.entries.map { v ->
+                Option(v.label, v.sub, v == settings.fps) {
+                    val changed = v != settings.fps
+                    settings.fps = v
+                    if (changed) rebind()
+                }
+            }
+            "focus" -> "Messa a fuoco" to listOf(
+                Option("AUTO", "continuo", controller.focusMode == CameraController.FocusMode.AUTO) {
+                    controller.setAutoFocus()
+                    overlay.focusMarker = null
+                },
+                Option("PUNTO", "tieni premuto", controller.focusMode == CameraController.FocusMode.POINT) {
+                    if (controller.focusMode != CameraController.FocusMode.POINT) {
+                        setFocusPoint(overlay.width / 2f, overlay.height / 2f)
+                    }
+                },
+                Option("MANUALE", "a mano", controller.focusMode == CameraController.FocusMode.MANUAL, keepOpen = true) {
+                    if (controller.supportsManualFocus) {
+                        controller.setManualFocus(controller.manualFocus)
+                        overlay.focusMarker = null
+                    } else {
+                        showToast(if (!controller.hasFocus) "Questa lente ha il fuoco fisso"
+                        else "Il fuoco manuale non è supportato da questa lente")
+                    }
+                }
+            )
+            "aperture" -> "Diaframma · lente ${controller.zoomLabel}" to controller.apertures.map { f ->
+                Option("f/" + fmtAperture(f), if (controller.apertureSelectable) "" else "fisso",
+                    f == controller.currentAperture) {
+                    if (controller.apertureSelectable) controller.setAperture(f)
+                }
+            }
+            else -> "Codec video" to Codec.entries.map { v ->
+                Option(v.label, v.sub, v == settings.codec) { settings.codec = v }
+            }
+        }
+        menuTitle.text = title
+        menuOptions.removeAllViews()
+        options.forEachIndexed { i, o ->
+            val tv = TextView(this).apply {
+                gravity = Gravity.CENTER
+                setBackgroundResource(if (o.selected) R.drawable.bg_option_selected else R.drawable.bg_option)
+                setTextColor(if (o.selected) Color.rgb(26, 18, 0) else Color.rgb(245, 245, 244))
+                val text = SpannableString(if (o.sub.isEmpty()) o.label else "${o.label}\n${o.sub}")
+                val n = o.label.length
+                text.setSpan(TypefaceSpan("monospace"), 0, n, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text.setSpan(StyleSpan(Typeface.BOLD), 0, n, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text.setSpan(RelativeSizeSpan(1.1f), 0, n, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (o.sub.isNotEmpty()) {
+                    text.setSpan(RelativeSizeSpan(0.8f), n + 1, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    text.setSpan(
+                        ForegroundColorSpan(if (o.selected) Color.rgb(61, 44, 0) else Color.rgb(168, 162, 158)),
+                        n + 1, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                this.text = text
+                textSize = 13f
+                setOnClickListener {
+                    o.apply()
+                    if (o.keepOpen) {
+                        val k = openMenu
+                        openMenu = null
+                        if (k != null) toggleMenu(k)
+                    } else {
+                        closeMenu()
+                    }
+                }
+            }
+            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            if (i > 0) lp.marginStart = (8 * dp).toInt()
+            menuOptions.addView(tv, lp)
+        }
+        if (options.size < 3) {
+            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, (3 - options.size).toFloat())
+            lp.marginStart = (8 * dp).toInt()
+            menuOptions.addView(View(this), lp)
+        }
+
+        val note: String? = when (key) {
+            "focus" -> when {
+                !controller.hasFocus -> "Questa lente ha il fuoco fisso: è sempre nitida da vicino a infinito."
+                controller.focusMode == CameraController.FocusMode.POINT ->
+                    "Tieni premuto sul mirino per spostare il punto. Il tocco semplice sposta il riquadro."
+                else -> null
+            }
+            "aperture" -> when {
+                controller.apertures.isEmpty() -> "Il telefono non indica il diaframma di questa lente."
+                !controller.apertureSelectable ->
+                    "Diaframma fisso: su questa lente il valore non si può cambiare (succede su quasi tutti i telefoni). Cambia lente per un valore diverso."
+                else -> null
+            }
+            else -> null
+        }
+        menuNote.text = note ?: ""
+        menuNote.visibility = if (note != null) View.VISIBLE else View.GONE
+        val showSeek = key == "focus" && controller.focusMode == CameraController.FocusMode.MANUAL &&
+            controller.supportsManualFocus
+        menuSeekRow.visibility = if (showSeek) View.VISIBLE else View.GONE
+        if (showSeek) focusSeek.progress = (controller.manualFocus * 1000).toInt()
+
+        menuPanel.visibility = View.VISIBLE
+        refreshUi()
+    }
+
+    private fun closeMenu() {
+        if (openMenu == null) return
+        openMenu = null
+        menuPanel.visibility = View.GONE
+        refreshUi()
+    }
+
+    // ---------- Lenti e messa a fuoco ----------
+
+    private fun buildLensRow() {
+        lensRow.removeAllViews()
+        val lenses = controller.lenses
+        lensRow.visibility = if (lenses.isEmpty()) View.GONE else View.VISIBLE
+        val size = (30 * dp).toInt()
+        lenses.forEachIndexed { i, o ->
+            val selected = o == controller.lens
+            val tv = TextView(this).apply {
+                text = if (selected) o.label else o.shortLabel
+                gravity = Gravity.CENTER
+                textSize = if (selected) 10f else 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (selected) accent else Color.WHITE)
+                setBackgroundResource(if (selected) R.drawable.bg_lens_selected else R.drawable.bg_lens)
+                contentDescription = "${o.label} ${o.name}"
+                rotation = iconRotation()
+                setOnClickListener { onLensSelected(o) }
+            }
+            val lp = LinearLayout.LayoutParams(size, size)
+            if (i > 0) lp.marginStart = (4 * dp).toInt()
+            lensRow.addView(tv, lp)
+        }
+    }
+
+    private fun onLensSelected(o: LensOption) {
+        if (o == controller.lens) return
+        if (controller.isRecording && !controller.canSwitchWhileRecording(o)) {
+            showToast("Questa lente non si può attivare durante la ripresa")
+            return
+        }
+        val needRebind = controller.selectLens(o)
+        settings.lensZoom = o.equivZoom
+        if (needRebind) rebind()
+        if (controller.focusMode == CameraController.FocusMode.POINT && !controller.hasFocus) {
+            controller.setAutoFocus()
+            overlay.focusMarker = null
+        }
+        buildLensRow()
+        openMenu?.let { k ->
+            openMenu = null
+            toggleMenu(k)
+        }
+        refreshUi()
+        val ap = controller.currentAperture?.let { " · f/" + fmtAperture(it) } ?: ""
+        showToast("${o.label} ${o.name}$ap")
+    }
+
+    private fun setFocusPoint(x: Float, y: Float) {
+        if (!controller.hasFocus) {
+            showToast("Questa lente ha il fuoco fisso")
+            return
+        }
+        controller.focusAt(x, y)
+        overlay.focusMarker = PointF(x, y)
+        if (openMenu == "focus") {
+            openMenu = null
+            toggleMenu("focus")
+        }
+        showToast("Fuoco ed esposizione bloccati qui")
+        refreshUi()
+    }
+
+    // ---------- Scatto ----------
+
+    private fun onShutter() {
+        closeMenu()
+        when {
+            mode == CameraController.Mode.PHOTO -> takePhoto()
+            recordingActive || controller.isRecording -> requestStop()
+            else -> startRecording()
+        }
+    }
+
+    private fun settingsLabel() =
+        "${settings.videoRes.label} · ${controller.activeFps} fps · ${settings.codec.label}"
+
+    private fun takePhoto() {
+        flashScreen()
+        val primary = overlay.primaryRect()
+        val secondary = overlay.secondaryRect()
+        val a = if (recordingActive) recAngle else angle
+        val duringVideo = recordingActive
+        val videoTakeId = currentJob?.id
+        val maxLong = settings.photoRes.maxLongSide
+        val lensLabel = controller.zoomLabel
+        val app = applicationContext
+        controller.takePhoto { bmp ->
+            if (bmp == null) {
+                runOnUiThread { showToast("Scatto non riuscito") }
+                return@takePhoto
+            }
+            val result = try {
+                PhotoProcessor.saveDual(app, bmp, primary, secondary, a, maxLong)
+            } catch (t: Throwable) {
+                null
+            } finally {
+                bmp.recycle()
+            }
+            if (result?.primary != null) {
+                val now = System.currentTimeMillis()
+                val pair = PhotoPair(now, MediaRef.of(result.vertical), MediaRef.of(result.horizontal))
+                if (duringVideo && videoTakeId != null) {
+                    TakeStore.addPhoto(app, videoTakeId, pair)
+                } else {
+                    TakeStore.upsert(app, Take(
+                        id = "p" + MediaSaver.timestamp(), type = "photo", createdAt = now, lens = lensLabel,
+                        settings = settings.photoRes.label, status = "done", photos = listOf(pair)
+                    ))
+                }
+            }
+            runOnUiThread {
+                if (result?.primary != null) {
+                    result.thumbnail?.let { gallery.setImageBitmap(it) }
+                    showToast(if (duringVideo) "Foto dal video · 9:16 + 16:9" else "2 foto salvate · 9:16 + 16:9")
+                } else {
+                    showToast("Salvataggio non riuscito")
+                }
+            }
+        }
+    }
+
+    // ---------- Video ----------
+
+    private fun startRecording() {
+        if (recordingActive || controller.isRecording) return
+        val id = MediaSaver.timestamp()
+        val file = PendingStore.newMasterFile(this, id)
+        recAngle = angle
+        overlay.deviceAngle = recAngle
+        val pt = CropTrack().also { it.add(0, overlay.primaryRect()) }
+        val st = CropTrack().also { it.add(0, overlay.secondaryRect()) }
+        primaryTrack = pt
+        secondaryTrack = st
+        val job = PendingJob(
+            id = id, masterPath = file.absolutePath, angle = recAngle, codec = settings.codec,
+            maxLongSide = settings.videoRes.maxLongSide, fps = controller.activeFps,
+            lensLabel = controller.zoomLabel, createdAt = System.currentTimeMillis(),
+            primaryTrack = pt, secondaryTrack = st, state = "recording"
+        )
+        currentJob = job
+
+        // La ripresa ha la priorità: l'elaborazione in sottofondo si ferma.
+        RecordingGate.isRecording = true
+        ExportScheduler.pause(applicationContext)
+        PendingStore.save(this, job)
+        TakeStore.upsert(this, Take(
+            id = id, type = "video", createdAt = job.createdAt, lens = job.lensLabel,
+            settings = settingsLabel(), status = "pending"
+        ))
+
+        recStartNs = SystemClock.elapsedRealtimeNanos()
+        recSeconds = 0
+        val audio = hasPermission(Manifest.permission.RECORD_AUDIO)
+        val ok = controller.startRecording(file, audio) { event -> onRecordEvent(event, job) }
+        if (!ok) {
+            finishRecording(job, forced = true, failed = true)
+            showToast("Registrazione non disponibile")
+            return
+        }
+        // Se la fotocamera non parte entro 5 s, sblocca tutto.
+        handler.postDelayed(startWatchdog, 5000)
+    }
+
+    private val startWatchdog = Runnable {
+        if (!recordingActive && controller.isRecording) {
+            controller.stopRecording()
+            finishRecording(currentJob, forced = true)
+        }
+    }
+
+    private val stopWatchdog = Runnable {
+        if (recordingActive || controller.isRecording) {
+            controller.clearRecording()
+            finishRecording(currentJob, forced = true)
+        }
+    }
+
+    private fun onRecordEvent(event: VideoRecordEvent, job: PendingJob) {
+        if (currentJob?.id != job.id) return // evento di una ripresa già chiusa
+        when (event) {
+            is VideoRecordEvent.Start -> {
+                handler.removeCallbacks(startWatchdog)
+                recStartNs = SystemClock.elapsedRealtimeNanos()
+                recordingActive = true
+                if (settings.flash == FlashMode.ON) controller.setTorch(true)
+                updateProcessing()
+                refreshUi()
+            }
+            is VideoRecordEvent.Status -> {
+                val s = event.recordingStats.recordedDurationNanos / 1_000_000_000L
+                if (s != recSeconds) {
+                    recSeconds = s
+                    refreshUi()
+                }
+            }
+            is VideoRecordEvent.Finalize -> {
+                val failed = event.error == VideoRecordEvent.Finalize.ERROR_NO_VALID_DATA
+                finishRecording(job, forced = false, failed = failed)
+            }
+        }
+    }
+
+    /** Ferma la ripresa; se entro 4 s non arriva la conferma, la chiude comunque. */
+    private fun requestStop() {
+        controller.stopRecording()
+        handler.removeCallbacks(stopWatchdog)
+        handler.postDelayed(stopWatchdog, 4000)
+    }
+
+    /**
+     * Chiude la ripresa (normalmente o perché bloccata) e la mette in coda
+     * per il taglio. È sicura da chiamare più volte.
+     */
+    private fun finishRecording(job0: PendingJob?, forced: Boolean, failed: Boolean = false) {
+        val job = job0 ?: currentJob
+        handler.removeCallbacks(startWatchdog)
+        handler.removeCallbacks(stopWatchdog)
+        controller.clearRecording()
+        controller.setTorch(false)
+        recordingActive = false
+        RecordingGate.isRecording = false
+        currentJob = null
+        overlay.deviceAngle = angle
+
+        if (job != null) {
+            val file = File(job.masterPath)
+            val usable = !failed && file.exists() && file.length() > 0
+            val app = applicationContext
+            if (usable) {
+                val now = (SystemClock.elapsedRealtimeNanos() - recStartNs) / 1000
+                primaryTrack?.add(now, overlay.primaryRect())
+                secondaryTrack?.add(now, overlay.secondaryRect())
+                val ready = job.copy(
+                    primaryTrack = (primaryTrack ?: job.primaryTrack).snapshot(),
+                    secondaryTrack = (secondaryTrack ?: job.secondaryTrack).snapshot(),
+                    state = "ready"
+                )
+                PendingStore.save(app, ready)
+                if (forced) showToast("Ripresa chiusa: il video è al sicuro e verrà tagliato a breve")
+                else showToast("Video salvato · lo taglio nei due formati")
+            } else {
+                PendingStore.remove(app, job)
+                TakeStore.update(app, job.id) { it.copy(status = "failed", note = "Registrazione non riuscita") }
+                if (!forced) showToast("Registrazione non riuscita")
+            }
+        }
+        primaryTrack = null
+        secondaryTrack = null
+        ExportScheduler.kick(applicationContext)
+        lifecycleScope.launch { refreshPending() }
+        updateProcessing()
+        refreshUi()
+    }
+
+    private fun onFramesMoved() {
+        if (recordingActive) {
+            val t = (SystemClock.elapsedRealtimeNanos() - recStartNs) / 1000
+            primaryTrack?.add(t, overlay.primaryRect())
+            secondaryTrack?.add(t, overlay.secondaryRect())
+        }
+    }
+}
