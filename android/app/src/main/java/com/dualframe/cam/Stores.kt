@@ -248,12 +248,7 @@ object TakeStore {
      */
     fun prune(context: Context) {
         val res = context.contentResolver
-        fun alive(r: MediaRef?): MediaRef? = r?.takeIf {
-            runCatching {
-                res.query(android.net.Uri.parse(it.uri), arrayOf(android.provider.MediaStore.MediaColumns._ID),
-                    null, null, null)?.use { c -> c.count > 0 } ?: false
-            }.getOrDefault(true) // nel dubbio non si cancella nulla
-        }
+        fun alive(r: MediaRef?): MediaRef? = r?.takeIf { exists(context, it) }
         synchronized(lock) {
             val list = all(context)
             var changed = false
@@ -275,6 +270,27 @@ object TakeStore {
             if (changed) write(context, out)
         }
     }
+
+    /**
+     * Il file c'è ancora ed è visibile? Un file "cancellato" da una galleria su Android 11+
+     * finisce nel cestino (IS_TRASHED = 1): per noi è come sparito.
+     */
+    fun exists(context: Context, ref: MediaRef): Boolean = runCatching {
+        val uri = android.net.Uri.parse(ref.uri)
+        val res = context.contentResolver
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val args = android.os.Bundle().apply {
+                putInt(android.provider.MediaStore.QUERY_ARG_MATCH_TRASHED, android.provider.MediaStore.MATCH_INCLUDE)
+            }
+            res.query(uri, arrayOf(android.provider.MediaStore.MediaColumns._ID,
+                android.provider.MediaStore.MediaColumns.IS_TRASHED), args, null)?.use { c ->
+                c.moveToFirst() && c.getInt(1) == 0
+            } ?: false
+        } else {
+            res.query(uri, arrayOf(android.provider.MediaStore.MediaColumns._ID), null, null, null)
+                ?.use { it.count > 0 } ?: false
+        }
+    }.getOrDefault(true) // nel dubbio non si toglie nulla
 
     fun remove(context: Context, id: String) = synchronized(lock) {
         write(context, all(context).filter { it.id != id })

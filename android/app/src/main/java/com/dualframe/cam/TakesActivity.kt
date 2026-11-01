@@ -103,15 +103,42 @@ class TakesActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Prima togli ciò che è stato cancellato dalla galleria, poi mostra l'elenco.
+        // Si aggiorna da solo quando una foto o un video cambia nella galleria (cancellato, cestinato, ripristinato).
+        for (u in listOf(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI)) {
+            contentResolver.registerContentObserver(u, true, mediaObserver)
+        }
+        pruneAndRefresh()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pruneAndRefresh()
+    }
+
+    private val mediaObserver = object : android.database.ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            handler.removeCallbacks(pruneRunnable)
+            handler.postDelayed(pruneRunnable, 400)
+        }
+    }
+
+    private val pruneRunnable = Runnable { pruneAndRefresh() }
+
+    /** Prima togli ciò che non c'è più nella galleria, poi ridisegna l'elenco. */
+    private fun pruneAndRefresh() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { TakeStore.prune(applicationContext) }
             lastSignature = ""
+            thumbs.evictAll()
+            handler.removeCallbacks(refresh)
             handler.post(refresh)
         }
     }
 
     override fun onStop() {
+        runCatching { contentResolver.unregisterContentObserver(mediaObserver) }
+        handler.removeCallbacks(pruneRunnable)
         handler.removeCallbacks(refresh)
         super.onStop()
     }
@@ -121,7 +148,7 @@ class TakesActivity : ComponentActivity() {
             val self = this
             lifecycleScope.launch {
                 val takes = withContext(Dispatchers.IO) { TakeStore.all(applicationContext) }
-                val sig = takes.joinToString { "${it.id}:${it.status}:${it.photos.size}:${it.note}:${it.vertical?.uri}:${it.horizontal?.uri}" }
+                val sig = takes.joinToString { t -> "${t.id}:${t.status}:${t.note}:${t.vertical?.uri}:${t.horizontal?.uri}:" + t.photos.joinToString(",") { "${it.vertical?.uri}|${it.horizontal?.uri}" } }
                 if (sig != lastSignature) {
                     lastSignature = sig
                     render(takes)

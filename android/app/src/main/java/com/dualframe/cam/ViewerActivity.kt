@@ -1,7 +1,6 @@
 package com.dualframe.cam
 
 import android.app.AlertDialog
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -400,17 +399,14 @@ class ViewerActivity : ComponentActivity() {
     private fun trash(item: Item) {
         val uri = item.uri ?: return
         if (Build.VERSION.SDK_INT >= 30) {
-            val ok = runCatching {
-                contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, null, null) > 0
-            }.getOrDefault(false)
-            if (ok) {
-                trashed(item)
-            } else {
-                runCatching {
-                    pendingTrash = item
-                    val pi = MediaStore.createTrashRequest(contentResolver, listOf(uri), true)
-                    trashLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-                }.onFailure { Toast.makeText(this, "Non riesco a cestinarlo", Toast.LENGTH_SHORT).show() }
+            // Richiesta di sistema: sposta davvero nel cestino condiviso, quello che vedono tutte le gallerie.
+            runCatching {
+                pendingTrash = item
+                val pi = MediaStore.createTrashRequest(contentResolver, listOf(uri), true)
+                trashLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            }.onFailure {
+                pendingTrash = null
+                Toast.makeText(this, "Non riesco a cestinarlo", Toast.LENGTH_SHORT).show()
             }
         } else {
             AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
