@@ -131,8 +131,8 @@ class MainActivity : ComponentActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            topBar.setPadding((12 * dp).toInt(), bars.top, (12 * dp).toInt(), (6 * dp).toInt())
-            bottomBar.setPadding(0, 0, 0, bars.bottom + (12 * dp).toInt())
+            topBar.setPadding((12 * dp).toInt(), bars.top + (2 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+            bottomBar.setPadding(0, 0, 0, bars.bottom + (8 * dp).toInt())
             topBar.post { layoutBelowTopBar() }
             insets
         }
@@ -176,6 +176,7 @@ class MainActivity : ComponentActivity() {
         chipCodec.caption = "Codec"; chipFocus.caption = "Fuoco"; chipAperture.caption = "Diafr."
         btnFlash.caption = "Flash"; btnGrid.caption = "Guide"
         sensorManager = getSystemService(android.hardware.SensorManager::class.java)
+        UpdateWorker.schedule(applicationContext)
         gallery.setOnClickListener { startActivity(Intent(this, TakesActivity::class.java)) }
         findViewById<Button>(R.id.btnPermission).setOnClickListener { requestPermissions() }
         focusSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -263,6 +264,25 @@ class MainActivity : ComponentActivity() {
         viewfinder.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h }
         menuPanel.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h }
         toastView.updateLayoutParams<FrameLayout.LayoutParams> { topMargin = h + (44 * dp).toInt() }
+        viewfinder.post { centerBottomControls() }
+    }
+
+    /**
+     * I comandi in basso stanno al centro dello spazio sotto il mirino, invece di
+     * restare schiacciati sul fondo con un vuoto sopra. Se lo spazio è poco restano in fondo.
+     */
+    private fun centerBottomControls() {
+        val free = root.height - (topBar.height + viewfinder.height)
+        bottomBar.measure(
+            View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val need = bottomBar.measuredHeight
+        val target = if (free > need) free else ViewGroup.LayoutParams.WRAP_CONTENT
+        if (bottomBar.layoutParams.height != target) {
+            bottomBar.updateLayoutParams<FrameLayout.LayoutParams> { height = target }
+            bottomBar.gravity = Gravity.CENTER
+        }
     }
 
     // ---------- Ciclo di vita ----------

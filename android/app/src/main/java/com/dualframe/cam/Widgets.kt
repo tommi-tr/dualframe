@@ -92,15 +92,15 @@ class SettingCell @JvmOverloads constructor(
 
     private val density = resources.displayMetrics.density
     private val captionView = android.widget.TextView(context).apply {
-        textSize = 8.5f
-        letterSpacing = 0.08f
+        textSize = 9f
+        letterSpacing = 0.1f
         setTextColor(Color.rgb(140, 136, 132))
         gravity = android.view.Gravity.CENTER
         maxLines = 1
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
     }
     private val valueView = android.widget.TextView(context).apply {
-        textSize = 12.5f
+        textSize = 14.5f
         setTextColor(Color.WHITE)
         gravity = android.view.Gravity.CENTER
         maxLines = 1
@@ -131,7 +131,7 @@ class SettingCell @JvmOverloads constructor(
         background = bg
         addView(captionView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(valueView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-            topMargin = (-1 * density).toInt()
+            topMargin = (1 * density).toInt()
         })
         refresh()
     }

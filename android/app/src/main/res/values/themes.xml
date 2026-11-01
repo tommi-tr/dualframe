@@ -42,13 +42,14 @@
 
     <style name="ModeLabel">
         <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_height">36dp</item>
         <item name="android:gravity">center</item>
         <item name="android:paddingStart">8dp</item>
         <item name="android:paddingEnd">8dp</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0.12</item>
+        <item name="android:textSize">12.5sp</item>
         <item name="android:textColor">#FFD6D3D1</item>
     </style>
     <style name="Cell">

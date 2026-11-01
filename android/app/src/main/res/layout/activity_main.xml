@@ -69,7 +69,7 @@
         <TextView
             android:id="@+id/appVersion"
             android:layout_width="wrap_content"
-            android:layout_height="22dp"
+            android:layout_height="26dp"
             android:layout_gravity="center_horizontal"
             android:gravity="center"
             android:paddingStart="12dp"
@@ -83,7 +83,7 @@
         <LinearLayout
             android:id="@+id/settingsBar"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="54dp"
             android:background="@drawable/bg_settings_bar"
             android:orientation="horizontal"
             android:padding="2dp">
@@ -196,7 +196,7 @@
         android:layout_gravity="bottom"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingBottom="16dp">
+        android:paddingBottom="8dp">
 
         <TextView
             android:id="@+id/processing"
@@ -232,14 +232,14 @@
 
         <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="96dp"
-            android:paddingStart="36dp"
-            android:paddingEnd="36dp">
+            android:layout_height="84dp"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp">
 
             <ImageView
                 android:id="@+id/gallery"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:layout_gravity="start|center_vertical"
                 android:background="@drawable/bg_thumb"
                 android:clipToOutline="true"
@@ -249,15 +249,15 @@
 
             <com.dualframe.cam.ShutterButton
                 android:id="@+id/shutter"
-                android:layout_width="80dp"
-                android:layout_height="80dp"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/cd_shutter" />
 
             <ImageButton
                 android:id="@+id/btnRecenter"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:layout_gravity="end|center_vertical"
                 android:background="@drawable/bg_circle"
                 android:contentDescription="@string/cd_recenter"
@@ -265,8 +265,8 @@
 
             <ImageButton
                 android:id="@+id/btnSnap"
-                android:layout_width="60dp"
-                android:layout_height="60dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_gravity="start|center_vertical"
                 android:background="@drawable/bg_circle_white"
                 android:contentDescription="@string/cd_snap"
